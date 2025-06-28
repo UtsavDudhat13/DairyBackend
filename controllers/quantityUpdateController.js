@@ -29,17 +29,41 @@ const updateCustomerQuantity = async (req, res) => {
     const originalQuantity = updateType === 'morning' ? customer.morningQuantity : customer.eveningQuantity;
     const difference = newQuantity - originalQuantity;
 
-    // Create quantity update record
-    const update = await QuantityUpdate.create({
+    // Check if a quantity update already exists for this date, customer, and update type
+    const existingUpdate = await QuantityUpdate.findOne({
       customer: customerId,
       date: new Date(date),
-      updateType,
-      oldQuantity: originalQuantity,
-      newQuantity,
-      difference,
-      reason,
-      updatedBy: customerId,
+      updateType
     });
+
+    let update;
+
+    if (existingUpdate) {
+      // Update existing record
+      update = await QuantityUpdate.findByIdAndUpdate(
+        existingUpdate._id,
+        {
+          oldQuantity: originalQuantity,
+          newQuantity,
+          difference,
+          reason,
+          updatedBy: customerId,
+        },
+        { new: true, runValidators: true }
+      );
+    } else {
+      // Create new quantity update record
+      update = await QuantityUpdate.create({
+        customer: customerId,
+        date: new Date(date),
+        updateType,
+        oldQuantity: originalQuantity,
+        newQuantity,
+        difference,
+        reason,
+        updatedBy: customerId,
+      });
+    }
 
     console.log(update);
 
