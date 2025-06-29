@@ -46,7 +46,7 @@ router.route('/:id/status')
   .put(protect, admin, updateInvoiceStatus);
 
 router.route('/:id/payment')
-  .post(protect, admin, addPaymentToInvoice);
+  .post(protect, addPaymentToInvoice);
 
 router.route('/:id/pdf')
   .get(generateModernInvoicePDF);
