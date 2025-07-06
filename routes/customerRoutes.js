@@ -19,6 +19,7 @@ router.route('/')
 router.route('/login')
   .post(authCustomer);
 
+  
 router.route('/:id')
   .get(protect, getCustomerById)
   .put(protect, admin, updateCustomer)
