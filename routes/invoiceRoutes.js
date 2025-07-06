@@ -39,14 +39,14 @@ router.route('/customer/:id')
   .get(protect, admin, getCustomerInvoices);
 
 router.route('/:id')
-  .get(protect, getInvoiceById)
+  .get(protect, admin, getInvoiceById)
   .delete(protect, admin, deleteInvoice);
 
 router.route('/:id/status')
   .put(protect, admin, updateInvoiceStatus);
 
 router.route('/:id/payment')
-  .post(protect, addPaymentToInvoice);
+  .post(protect, admin, addPaymentToInvoice);
 
 router.route('/:id/pdf')
   .get(generateModernInvoicePDF);

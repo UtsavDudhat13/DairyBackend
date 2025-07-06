@@ -5,9 +5,8 @@ import Record from '../models/Record.js';
 import Customer from '../models/Customer.js';
 import PDFDocument from 'pdfkit';
 import QRCode from 'qrcode';
-import path from 'path';
-import fs from 'fs';
 import { registerFonts } from '../config/fonts.js';
+import Category from '../models/Category.js';
 
 const generateInvoiceNumber = async () => {
     const date = new Date();
@@ -119,7 +118,7 @@ export const generateCustomerMonthlyInvoice = async (req, res) => {
         // Check if invoice already exists for this period
         const existingInvoice = await Invoice.findOne({
             customer: id,
-            startDate: { $lte: endDate },
+            startDate: { $lte: new Date(new Date(endDate).setDate(new Date(endDate).getDate() + 1)) },
             endDate: { $gte: startDate },
         });
 
@@ -143,7 +142,7 @@ export const generateCustomerMonthlyInvoice = async (req, res) => {
             customer: id,
             date: {
                 $gte: startDate,
-                $lte: endDate,
+                $lte: new Date(new Date(endDate).setDate(new Date(endDate).getDate() + 1)),
             },
         }).sort({ date: 1 });
 
@@ -157,17 +156,14 @@ export const generateCustomerMonthlyInvoice = async (req, res) => {
         const items = [];
 
         records.forEach(record => {
-            totalQuantity += record.totalQuantity;
-            totalAmount += record.totalAmount;
-
             items.push({
                 date: record.date,
-                morningQuantity: record.morningQuantity,
-                eveningQuantity: record.eveningQuantity,
-                dailyQuantity: record.totalQuantity,
-                price: record.price,
-                dailyAmount: record.totalAmount,
+                deliverySchedule: record.deliverySchedule,
+                totalDailyQuantity: record.totalDailyQuantity,
+                totalDailyPrice: record.totalDailyPrice
             });
+            totalQuantity += record.totalDailyQuantity;
+            totalAmount += record.totalDailyPrice;
         });
 
         let invoice;
@@ -252,6 +248,8 @@ export const generateBatchMonthlyInvoices = async (req, res) => {
         const startDate = new Date(yearNum, monthNum - 1, 1);
         const endDate = new Date(yearNum, monthNum, 0); // Last day of the month
 
+        console.log(startDate, endDate);
+
         // Get all active customers
         const customers = await Customer.find({ isActive: true });
 
@@ -305,17 +303,14 @@ export const generateBatchMonthlyInvoices = async (req, res) => {
                 const items = [];
 
                 records.forEach(record => {
-                    totalQuantity += record.totalQuantity;
-                    totalAmount += record.totalAmount;
-
                     items.push({
                         date: record.date,
-                        morningQuantity: record.morningQuantity,
-                        eveningQuantity: record.eveningQuantity,
-                        dailyQuantity: record.totalQuantity,
-                        price: record.price,
-                        dailyAmount: record.totalAmount,
+                        deliverySchedule: record.deliverySchedule,
+                        totalDailyQuantity: record.totalDailyQuantity,
+                        totalDailyPrice: record.totalDailyPrice
                     });
+                    totalQuantity += record.totalDailyQuantity;
+                    totalAmount += record.totalDailyPrice;
                 });
 
                 let invoice;
@@ -474,7 +469,15 @@ export const getInvoices = async (req, res) => {
 export const getInvoiceById = async (req, res) => {
     try {
         const invoice = await Invoice.findById(req.params.id)
-            .populate('customer', 'name phoneNo address customerNo');
+            .populate('customer', 'name phoneNo address customerNo')
+            .populate({
+                path: 'items.deliverySchedule.milkItems.milkType',
+                select: 'name'
+            })
+            .populate({
+                path: 'items.deliverySchedule.milkItems.subcategory',
+                select: 'name price'
+            });
 
         if (!invoice) {
             return res.status(404).json({ message: 'Invoice not found' });
@@ -578,9 +581,7 @@ export const addPaymentToInvoice = async (req, res) => {
             transactionId: finalTransactionId,
             notes,
         };
-
         const updatedInvoice = await invoice.addPayment(payment);
-
         return res.status(200).json(updatedInvoice);
     } catch (error) {
         return res.status(500).json({ message: error.message });
@@ -845,6 +846,8 @@ export const generateDairyFormPDF = async (invoiceData, outputStream, options = 
         // Merge options
         const mergedOptions = { ...defaultOptions, ...options };
 
+
+
         // Create a new PDF document
         const doc = new PDFDocument({
             size: 'A4',
@@ -888,17 +891,64 @@ export const generateDairyFormPDF = async (invoiceData, outputStream, options = 
         const startDate = new Date(invoiceData.startDate);
         const monthText = getGujaratiMonth(startDate.getMonth() + 1);
         const yearText = startDate.getFullYear();
-        const price = invoiceData.items.length > 0 ? invoiceData.items[0].price : 0;
 
-        // Extract customer address
-        const customerAddress = invoiceData.customer?.address || '';
+        // Get all milk types and their prices from customer's deliverySchedule
+        const milkTypes = new Map(); // Map to store unique milk types with their prices
+
+        if (mergedOptions.customer && mergedOptions.customer.deliverySchedule) {
+            mergedOptions.customer.deliverySchedule.forEach(delivery => {
+                delivery.milkItems.forEach(milkItem => {
+                    let typeName = '';
+                    let rawName = '';
+                    if (milkItem.milkType && typeof milkItem.milkType === 'object' && milkItem.milkType.name) {
+                        rawName = milkItem.milkType.name;
+                        const typeNameLower = rawName.toLowerCase().trim();
+                        if (
+                            typeNameLower.includes('cow') || typeNameLower.includes('ગાય')
+                        ) {
+                            typeName = 'ગાય';
+                        } else if (
+                            typeNameLower.includes('buffalo') || typeNameLower.includes('ભેસ')
+                        ) {
+                            typeName = 'ભેસ';
+                        } else {
+                            typeName = rawName; // fallback
+                        }
+                    } else {
+                        typeName = 'ગાય'; // Default
+                    }
+                    // Store the milk type with its price (use the first occurrence's price)
+                    if (!milkTypes.has(typeName)) {
+                        milkTypes.set(typeName, milkItem.pricePerUnit);
+                    }
+                });
+            });
+        }
+
+        // If no milk types found, use default
+        if (milkTypes.size === 0) {
+            milkTypes.set('ગાય', 60); // Default price
+        }
+
+        // Create price display string in Gujarati with proper spacing
+        let priceDisplay = '';
+        if (milkTypes.size === 1) {
+            const [typeName, price] = milkTypes.entries().next().value;
+            priceDisplay = `${typeName}:\u00A0${toGujaratiNumber(price)} રૂ.`;
+        } else {
+            const priceStrings = Array.from(milkTypes.entries()).map(
+                ([typeName, price]) => `${typeName}:\u00A0${toGujaratiNumber(price)} રૂ.`
+            );
+            priceDisplay = priceStrings.join(', ');
+        }
+
 
         // Month/Rate/Place
         doc.font('Gujarati').fontSize(14);
         doc.text('માસ:', 30, 145);
         doc.text(`${monthText} ${yearText}`, 95, 145);
         doc.text('ભાવ:', 220, 145);
-        doc.text(`${toGujaratiNumber(price)} રૂ.`, 275, 145);
+        doc.text(priceDisplay, 275, 145);
         // doc.text('ઠે.:', 400, 145);
         // doc.text(customerAddress, 445, 145);
 
@@ -913,135 +963,156 @@ export const generateDairyFormPDF = async (invoiceData, outputStream, options = 
         const tableWidth = doc.page.width - marginLeft - marginRight;
         const startY = 175;
 
-        // Divide table into 9 columns (3 sets of date, morning, evening)
-        const columnCount = 9;
-        const columnWidth = tableWidth / columnCount;
+        // Each block: 1 date + 2 (સવાર) + 2 (સાંજ) = 5 columns per block, but for 10 days per row, we need to repeat
+        // For 1-10, 11-20, 21-30 (3 blocks)
+        const blockCount = 3;
+        const daysPerBlock = 10;
+        const milkTypesOrder = ['ગાય', 'ભેસ'];
+        const columnsPerBlock = 1 + 2 * 2; // 1 (date) + 2 (સવાર) + 2 (સાંજ)
+        const totalColumns = blockCount * 5; // 5 columns per block
+        const columnWidth = tableWidth / totalColumns;
+        const headerHeight = 20;
+        const subHeaderHeight = 18;
+        const rowHeight = 24;
 
-        // Define table headers
-        const headers = ['તા.', 'સવાર', 'સાંજ', 'તા.', 'સવાર', 'સાંજ', 'તા.', 'સવાર', 'સાંજ'];
-
-        // Draw table headers
+        // Draw first header row (main headers)
         let y = startY;
         let x = marginLeft;
-        const headerHeight = 25;
-        const rowHeight = 30;
-
-        // Draw header cells
-        for (let i = 0; i < headers.length; i++) {
-            doc.rect(x, y, columnWidth, headerHeight).stroke();
-            // Fill header background
-            doc.fillColor('#f0f0f0');
-            doc.rect(x + 1, y + 1, columnWidth - 2, headerHeight - 2).fill();
-            doc.fillColor('black').font('Gujarati').fontSize(11);
-            doc.text(headers[i], x + 2, y + 7, { width: columnWidth - 4, align: 'center' });
+        for (let block = 0; block < blockCount; block++) {
+            // Date column
+            doc.rect(x, y, columnWidth, headerHeight + subHeaderHeight).stroke();
+            doc.font('Gujarati').fontSize(11).fillColor('black');
+            doc.text('તા.', x, y + 8, { width: columnWidth, align: 'center' });
             x += columnWidth;
+            // 'સવાર' colspan=2
+            doc.rect(x, y, columnWidth * 2, headerHeight).stroke();
+            doc.font('Gujarati').fontSize(11).fillColor('black');
+            doc.text('સવાર', x, y + 4, { width: columnWidth * 2, align: 'center' });
+            x += columnWidth * 2;
+            // 'સાંજ' colspan=2
+            doc.rect(x, y, columnWidth * 2, headerHeight).stroke();
+            doc.font('Gujarati').fontSize(11).fillColor('black');
+            doc.text('સાંજ', x, y + 4, { width: columnWidth * 2, align: 'center' });
+            x += columnWidth * 2;
         }
-
+        // Draw sub-header row (milk types)
         y += headerHeight;
-
-        // Prepare the data from invoice items
-        const morningValues = Array(31).fill('');
-        const eveningValues = Array(31).fill('');
-
+        x = marginLeft;
+        for (let block = 0; block < blockCount; block++) {
+            // Date column (empty)
+            doc.rect(x, y, columnWidth, subHeaderHeight).stroke();
+            x += columnWidth;
+            // 'ગાય' and 'ભેસ' under 'સવાર'
+            for (let i = 0; i < 2; i++) {
+                doc.rect(x, y, columnWidth, subHeaderHeight).stroke();
+                doc.font('Gujarati').fontSize(10).fillColor('black');
+                doc.text(milkTypesOrder[i], x, y + 3, { width: columnWidth, align: 'center' });
+                x += columnWidth;
+            }
+            // 'ગાય' and 'ભેસ' under 'સાંજ'
+            for (let i = 0; i < 2; i++) {
+                doc.rect(x, y, columnWidth, subHeaderHeight).stroke();
+                doc.font('Gujarati').fontSize(10).fillColor('black');
+                doc.text(milkTypesOrder[i], x, y + 3, { width: columnWidth, align: 'center' });
+                x += columnWidth;
+            }
+        }
+        // Prepare data arrays for each day and milk type
+        // Structure: [ [morningCow, morningBuffalo, eveningCow, eveningBuffalo], ... ]
+        const dayData = Array(31).fill(null).map(() => ({
+            morning: { 'ગાય': '', 'ભેસ': '' },
+            evening: { 'ગાય': '', 'ભેસ': '' }
+        }));
         // Fill the arrays with actual data from invoice items
         invoiceData.items.forEach(item => {
             const day = new Date(item.date).getDate();
             if (day > 0 && day <= 31) {
-                morningValues[day - 1] = toGujaratiNumber(item.morningQuantity || 0);
-                eveningValues[day - 1] = toGujaratiNumber(item.eveningQuantity || 0);
+                if (item.deliverySchedule) {
+                    item.deliverySchedule.forEach(delivery => {
+                        const time = delivery.time;
+                        if (delivery.milkItems && Array.isArray(delivery.milkItems)) {
+                            delivery.milkItems.forEach(milkItem => {
+                                let typeName = '';
+                                if (milkItem.milkType && typeof milkItem.milkType === 'object' && milkItem.milkType.name) {
+                                    const typeNameLower = milkItem.milkType.name.toLowerCase().replace(/\s/g, '');
+                                    if (typeNameLower.includes('cow') || typeNameLower.includes('ગાય')) {
+                                        typeName = 'ગાય';
+                                    } else if (typeNameLower.includes('buffalo') || typeNameLower.includes('ભેસ')) {
+                                        typeName = 'ભેસ';
+                                    } else {
+                                        typeName = milkItem.milkType.name;
+                                    }
+                                } else {
+                                    typeName = 'ગાય';
+                                }
+                                if (milkTypesOrder.includes(typeName) && (time === 'morning' || time === 'evening')) {
+                                    dayData[day - 1][time][typeName] = toGujaratiNumber(milkItem.quantity);
+                                    // Debug log
+                                }
+                            });
+                        }
+                    });
+                }
             }
         });
-
         // Draw data rows (10 rows with numbers 1-10, 11-20, 21-30)
+        y += subHeaderHeight;
         for (let row = 0; row < 10; row++) {
             x = marginLeft;
-
-            // Convert to Gujarati numerals
-            const num1 = toGujaratiNumber(row + 1);
-            const num2 = toGujaratiNumber(row + 11);
-            const num3 = toGujaratiNumber(row + 21);
-
-            // First column set (1-10)
-            doc.rect(x, y, columnWidth, rowHeight).stroke();
-            doc.text(num1, x + 2, y + 10, { width: columnWidth - 4, align: 'center' });
-            x += columnWidth;
-
-            // Morning and Evening columns for first set
-            doc.rect(x, y, columnWidth, rowHeight).stroke();
-            doc.text(morningValues[row], x + 2, y + 10, { width: columnWidth - 4, align: 'center' });
-            x += columnWidth;
-            doc.rect(x, y, columnWidth, rowHeight).stroke();
-            doc.text(eveningValues[row], x + 2, y + 10, { width: columnWidth - 4, align: 'center' });
-            x += columnWidth;
-
-            // Second column set (11-20)
-            doc.rect(x, y, columnWidth, rowHeight).stroke();
-            doc.text(num2, x + 2, y + 10, { width: columnWidth - 4, align: 'center' });
-            x += columnWidth;
-
-            // Morning and Evening columns for second set
-            doc.rect(x, y, columnWidth, rowHeight).stroke();
-            doc.text(morningValues[row + 10], x + 2, y + 10, { width: columnWidth - 4, align: 'center' });
-            x += columnWidth;
-            doc.rect(x, y, columnWidth, rowHeight).stroke();
-            doc.text(eveningValues[row + 10], x + 2, y + 10, { width: columnWidth - 4, align: 'center' });
-            x += columnWidth;
-
-            // Third column set (21-30)
-            doc.rect(x, y, columnWidth, rowHeight).stroke();
-            doc.text(num3, x + 2, y + 10, { width: columnWidth - 4, align: 'center' });
-            x += columnWidth;
-
-            // Morning and Evening columns for third set
-            doc.rect(x, y, columnWidth, rowHeight).stroke();
-            doc.text(morningValues[row + 20], x + 2, y + 10, { width: columnWidth - 4, align: 'center' });
-            x += columnWidth;
-            doc.rect(x, y, columnWidth, rowHeight).stroke();
-            doc.text(eveningValues[row + 20], x + 2, y + 10, { width: columnWidth - 4, align: 'center' });
-
+            for (let block = 0; block < blockCount; block++) {
+                const dayNum = row + 1 + block * 10;
+                // Date cell
+                doc.rect(x, y, columnWidth, rowHeight).stroke();
+                if (dayNum <= 31) {
+                    doc.font('Gujarati').fontSize(10).fillColor('black');
+                    doc.text(toGujaratiNumber(dayNum), x, y + 7, { width: columnWidth, align: 'center' });
+                }
+                x += columnWidth;
+                // Morning: ગાય
+                doc.rect(x, y, columnWidth, rowHeight).stroke();
+                if (dayNum <= 31) doc.text(dayData[dayNum - 1].morning['ગાય'], x, y + 7, { width: columnWidth, align: 'center' });
+                x += columnWidth;
+                // Morning: ભેસ
+                doc.rect(x, y, columnWidth, rowHeight).stroke();
+                if (dayNum <= 31) doc.text(dayData[dayNum - 1].morning['ભેસ'], x, y + 7, { width: columnWidth, align: 'center' });
+                x += columnWidth;
+                // Evening: ગાય
+                doc.rect(x, y, columnWidth, rowHeight).stroke();
+                if (dayNum <= 31) doc.text(dayData[dayNum - 1].evening['ગાય'], x, y + 7, { width: columnWidth, align: 'center' });
+                x += columnWidth;
+                // Evening: ભેસ
+                doc.rect(x, y, columnWidth, rowHeight).stroke();
+                if (dayNum <= 31) doc.text(dayData[dayNum - 1].evening['ભેસ'], x, y + 7, { width: columnWidth, align: 'center' });
+                x += columnWidth;
+            }
             y += rowHeight;
         }
-
         // Add row for day 31
         x = marginLeft;
-
-        // First column set - blank for day 31 row
-        doc.rect(x, y, columnWidth, rowHeight).stroke();
-        x += columnWidth;
-        doc.rect(x, y, columnWidth, rowHeight).stroke();
-        x += columnWidth;
-        doc.rect(x, y, columnWidth, rowHeight).stroke();
-        x += columnWidth;
-
-        // Second column set - blank for day 31 row
-        doc.rect(x, y, columnWidth, rowHeight).stroke();
-        x += columnWidth;
-        doc.rect(x, y, columnWidth, rowHeight).stroke();
-        x += columnWidth;
-        doc.rect(x, y, columnWidth, rowHeight).stroke();
-        x += columnWidth;
-
-        // Third column set - with day 31
-        doc.rect(x, y, columnWidth, rowHeight).stroke();
-        doc.text(toGujaratiNumber(31), x + 2, y + 10, { width: columnWidth - 4, align: 'center' });
-        x += columnWidth;
-        doc.rect(x, y, columnWidth, rowHeight).stroke();
-        doc.text(morningValues[30], x + 2, y + 10, { width: columnWidth - 4, align: 'center' });
-        x += columnWidth;
-        doc.rect(x, y, columnWidth, rowHeight).stroke();
-        doc.text(eveningValues[30], x + 2, y + 10, { width: columnWidth - 4, align: 'center' });
-
-        y += rowHeight;
-
-        // Add the total row
-        x = marginLeft;
-        for (let i = 0; i < 9; i++) {
+        for (let block = 0; block < blockCount; block++) {
+            const dayNum = 31;
+            // Date cell
             doc.rect(x, y, columnWidth, rowHeight).stroke();
-            if (i === 1 || i === 4 || i === 7) {
-                doc.text('કુલ', x + 2, y + 10, { width: columnWidth - 4, align: 'center' });
-            }
+            if (block === 2) doc.text(toGujaratiNumber(dayNum), x, y + 7, { width: columnWidth, align: 'center' });
+            x += columnWidth;
+            // Morning: ગાય
+            doc.rect(x, y, columnWidth, rowHeight).stroke();
+            if (block === 2) doc.text(dayData[dayNum - 1].morning['ગાય'], x, y + 7, { width: columnWidth, align: 'center' });
+            x += columnWidth;
+            // Morning: ભેસ
+            doc.rect(x, y, columnWidth, rowHeight).stroke();
+            if (block === 2) doc.text(dayData[dayNum - 1].morning['ભેસ'], x, y + 7, { width: columnWidth, align: 'center' });
+            x += columnWidth;
+            // Evening: ગાય
+            doc.rect(x, y, columnWidth, rowHeight).stroke();
+            if (block === 2) doc.text(dayData[dayNum - 1].evening['ગાય'], x, y + 7, { width: columnWidth, align: 'center' });
+            x += columnWidth;
+            // Evening: ભેસ
+            doc.rect(x, y, columnWidth, rowHeight).stroke();
+            if (block === 2) doc.text(dayData[dayNum - 1].evening['ભેસ'], x, y + 7, { width: columnWidth, align: 'center' });
             x += columnWidth;
         }
+        y += rowHeight;
 
         // Account summary section - 20px below the table
         const summaryY = y + 50;
@@ -1124,17 +1195,43 @@ export const generateModernInvoicePDF = async (req, res) => {
         // Fetch invoice with customer details
         const invoice = await Invoice.findById(id).populate('customer');
 
+        for (const item of invoice.items) {
+            for (const delivery of item.deliverySchedule) {
+                for (const milkItem of delivery.milkItems) {
+
+                    milkItem.milkType = await Category.findById(milkItem.milkType).select('name');
+
+                }
+            }
+        }
+
         if (!invoice) {
             return res.status(404).json({ message: 'Invoice not found' });
+        }
+
+        // Fetch customer with populated deliverySchedule to get milk types and prices
+        const customer = await Customer.findById(invoice.customer._id)
+            .populate({
+                path: 'deliverySchedule.milkItems.milkType',
+                select: 'name'
+            })
+            .populate({
+                path: 'deliverySchedule.milkItems.subcategory',
+                select: 'name price'
+            });
+
+        if (!customer) {
+            return res.status(404).json({ message: 'Customer not found' });
         }
 
         // Set response headers
         res.setHeader('Content-Type', 'application/pdf');
         res.setHeader('Content-Disposition', `attachment; filename=invoice-${invoice.invoiceNumber}-modern.pdf`);
 
-        // Generate the PDF using the utility function
+        // Generate the PDF using the utility function with customer data
         await generateDairyFormPDF(invoice, res, {
             upiId: 'ramdevdairy@upi',
+            customer: customer // Pass customer data with deliverySchedule
         });
 
     } catch (error) {

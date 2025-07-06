@@ -41,13 +41,50 @@ const generateMonthlyRecords = (year, month, basePrice) => {
         const dailyQuantity = Math.round((morningQuantity + eveningQuantity) * 100) / 100;
         const dailyAmount = Math.round(dailyQuantity * basePrice * 100) / 100;
 
+        // Create delivery schedule with milk items (simplified for seeding)
+        const deliverySchedule = [];
+
+        // Morning delivery
+        if (morningQuantity > 0) {
+            deliverySchedule.push({
+                time: 'morning',
+                milkItems: [
+                    {
+                        milkType: '507f1f77bcf86cd799439011', // Default milk type ID
+                        subcategory: '507f1f77bcf86cd799439012', // Default subcategory ID
+                        quantity: morningQuantity,
+                        pricePerUnit: basePrice,
+                        totalPrice: Math.round(morningQuantity * basePrice * 100) / 100
+                    }
+                ],
+                totalQuantity: morningQuantity,
+                totalPrice: Math.round(morningQuantity * basePrice * 100) / 100
+            });
+        }
+
+        // Evening delivery
+        if (eveningQuantity > 0) {
+            deliverySchedule.push({
+                time: 'evening',
+                milkItems: [
+                    {
+                        milkType: '507f1f77bcf86cd799439011', // Default milk type ID
+                        subcategory: '507f1f77bcf86cd799439012', // Default subcategory ID
+                        quantity: eveningQuantity,
+                        pricePerUnit: basePrice,
+                        totalPrice: Math.round(eveningQuantity * basePrice * 100) / 100
+                    }
+                ],
+                totalQuantity: eveningQuantity,
+                totalPrice: Math.round(eveningQuantity * basePrice * 100) / 100
+            });
+        }
+
         records.push({
             date: date,
-            morningQuantity,
-            eveningQuantity,
-            dailyQuantity,
-            price: basePrice,
-            dailyAmount
+            deliverySchedule,
+            totalDailyQuantity: dailyQuantity,
+            totalDailyPrice: dailyAmount
         });
     }
 
@@ -96,8 +133,8 @@ const createInvoiceForMonth = async (customer, year, month, counter) => {
     let totalAmount = 0;
 
     items.forEach(item => {
-        totalQuantity += item.dailyQuantity;
-        totalAmount += item.dailyAmount;
+        totalQuantity += item.totalDailyQuantity;
+        totalAmount += item.totalDailyPrice;
     });
 
     // Round to 2 decimal places

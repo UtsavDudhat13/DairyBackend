@@ -58,26 +58,24 @@ const invoiceSchema = mongoose.Schema(
                     type: Date,
                     required: true,
                 },
-                morningQuantity: {
-                    type: Number,
-                    default: 0,
-                },
-                eveningQuantity: {
-                    type: Number,
-                    default: 0,
-                },
-                dailyQuantity: {
-                    type: Number,
-                    required: true,
-                },
-                price: {
-                    type: Number,
-                    required: true,
-                },
-                dailyAmount: {
-                    type: Number,
-                    required: true,
-                },
+                deliverySchedule: [
+                    {
+                        time: { type: String, enum: ['morning', 'evening'], required: true },
+                        milkItems: [
+                            {
+                                milkType: { type: mongoose.Schema.Types.ObjectId, ref: 'Category', required: true },
+                                subcategory: { type: mongoose.Schema.Types.ObjectId, ref: 'Subcategory', required: true },
+                                quantity: { type: Number, required: true },
+                                pricePerUnit: { type: Number, required: true },
+                                totalPrice: { type: Number, required: true }
+                            }
+                        ],
+                        totalQuantity: { type: Number, default: 0 },
+                        totalPrice: { type: Number, default: 0 }
+                    }
+                ],
+                totalDailyQuantity: { type: Number, default: 0 },
+                totalDailyPrice: { type: Number, default: 0 }
             },
         ],
         // Track payment history

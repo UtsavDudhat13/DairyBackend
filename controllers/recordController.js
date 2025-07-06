@@ -31,14 +31,7 @@ const getRecords = async (req, res) => {
         $lte: end
       };
 
-      // Debug logging - remove this after testing
-      console.log('Date filter:', {
-        startDate,
-        endDate,
-        start: start.toISOString(),
-        end: end.toISOString(),
-        query: query.date
-      });
+
     } else if (startDate) {
       // Only start date provided - from start date onwards
       const start = new Date(startDate + 'T00:00:00.000Z');
@@ -110,6 +103,14 @@ const getRecords = async (req, res) => {
     // Get records with pagination
     const records = await Record.find(query)
       .populate('customer', 'name customerNo phoneNo')
+      .populate({
+        path: 'deliverySchedule.milkItems.milkType',
+        select: 'name'
+      })
+      .populate({
+        path: 'deliverySchedule.milkItems.subcategory',
+        select: 'name'
+      })
       .sort({ date: -1, 'customer.name': 1 })
       .skip(skip)
       .limit(parseInt(limit));
@@ -233,30 +234,55 @@ const createDailyRecords = async (req, res) => {
           date: { $gte: startOfDay, $lte: endOfDay }
         });
 
-        // Calculate final quantities considering updates
-        let morningQuantity = customer.morningQuantity;
-        let eveningQuantity = customer.eveningQuantity;
+        // Prepare new deliverySchedule for the record
+        const recordDeliverySchedule = [];
+        let totalDailyQuantity = 0;
+        let totalDailyPrice = 0;
 
-        // Apply any updates
-        updates.forEach(update => {
-          if (update.updateType === 'morning') {
-            morningQuantity = update.newQuantity;
-          } else {
-            eveningQuantity = update.newQuantity;
+        for (const delivery of customer.deliverySchedule) {
+          const recordMilkItems = [];
+          let deliveryTotalQuantity = 0;
+          let deliveryTotalPrice = 0;
+
+          for (const milkItem of delivery.milkItems) {
+            // Check for quantity update for this milk item and time
+            const update = updates.find(u =>
+              u.time === delivery.time &&
+              u.milkType.toString() === milkItem.milkType.toString() &&
+              u.subcategory.toString() === milkItem.subcategory.toString()
+            );
+            const quantity = update ? update.newQuantity : milkItem.quantity;
+            const pricePerUnit = milkItem.pricePerUnit;
+            const totalPrice = quantity * pricePerUnit;
+
+            recordMilkItems.push({
+              milkType: milkItem.milkType,
+              subcategory: milkItem.subcategory,
+              quantity,
+              pricePerUnit,
+              totalPrice
+            });
+            deliveryTotalQuantity += quantity;
+            deliveryTotalPrice += totalPrice;
           }
-        });
 
-        const totalQuantity = morningQuantity + eveningQuantity;
+          recordDeliverySchedule.push({
+            time: delivery.time,
+            milkItems: recordMilkItems,
+            totalQuantity: deliveryTotalQuantity,
+            totalPrice: deliveryTotalPrice
+          });
+          totalDailyQuantity += deliveryTotalQuantity;
+          totalDailyPrice += deliveryTotalPrice;
+        }
 
         // Create the record
         const record = await Record.create({
           customer: customer._id,
           date: today,
-          morningQuantity,
-          eveningQuantity,
-          totalQuantity,
-          price: customer.price,
-          totalAmount: totalQuantity * customer.price
+          deliverySchedule: recordDeliverySchedule,
+          totalDailyQuantity,
+          totalDailyPrice
         });
 
         records.push(record);
@@ -397,7 +423,15 @@ const getRecordsSummary = async (req, res) => {
 const getRecordById = async (req, res) => {
   try {
     const record = await Record.findById(req.params.id)
-      .populate('customer', 'name customerNo phoneNo');
+      .populate('customer', 'name customerNo phoneNo')
+      .populate({
+        path: 'deliverySchedule.milkItems.milkType',
+        select: 'name'
+      })
+      .populate({
+        path: 'deliverySchedule.milkItems.subcategory',
+        select: 'name'
+      });
 
     if (!record) {
       return res.status(404).json({
@@ -431,63 +465,33 @@ const getRecordById = async (req, res) => {
 // @access  Private/Admin
 const updateRecord = async (req, res) => {
   try {
-    const {
-      morningQuantity,
-      eveningQuantity,
-      price
-    } = req.body;
-
-    // Find the record
     const record = await Record.findById(req.params.id);
-
     if (!record) {
-      return res.status(404).json({
-        success: false,
-        error: 'Record not found'
-      });
+      return res.status(404).json({ success: false, error: 'Record not found' });
     }
 
-    // Update quantities if provided
-    if (morningQuantity !== undefined) {
-      record.morningQuantity = Number(morningQuantity);
+    // Update deliverySchedule and totals if provided
+    if (req.body.deliverySchedule) {
+      record.deliverySchedule = req.body.deliverySchedule;
+    }
+    if (req.body.totalDailyQuantity !== undefined) {
+      record.totalDailyQuantity = req.body.totalDailyQuantity;
+    }
+    if (req.body.totalDailyPrice !== undefined) {
+      record.totalDailyPrice = req.body.totalDailyPrice;
     }
 
-    if (eveningQuantity !== undefined) {
-      record.eveningQuantity = Number(eveningQuantity);
-    }
-
-    // Update price if provided
-    if (price !== undefined) {
-      record.price = Number(price);
-    }
-
-    // Recalculate total quantity and amount
-    record.totalQuantity = record.morningQuantity + record.eveningQuantity;
-    record.totalAmount = record.totalQuantity * record.price;
-
-    // Save updated record
     await record.save();
 
-    // Populate customer details and return updated record
+    // Repopulate for response
     const updatedRecord = await Record.findById(record._id)
-      .populate('customer', 'name customerNo phoneNo');
+      .populate('customer', 'name customerNo phoneNo')
+      .populate({ path: 'deliverySchedule.milkItems.milkType', select: 'name' })
+      .populate({ path: 'deliverySchedule.milkItems.subcategory', select: 'name' });
 
-    res.json({
-      success: true,
-      data: updatedRecord
-    });
+    res.json({ success: true, data: updatedRecord });
   } catch (error) {
-    if (error.kind === 'ObjectId') {
-      return res.status(404).json({
-        success: false,
-        error: 'Record not found'
-      });
-    }
-
-    res.status(500).json({
-      success: false,
-      error: error.message
-    });
+    res.status(500).json({ success: false, error: error.message });
   }
 };
 
@@ -580,6 +584,14 @@ const getRecordsByCustomer = async (req, res) => {
     // Get records with pagination
     const records = await Record.find(query)
       .populate('customer', 'name customerNo phoneNo')
+      .populate({
+        path: 'deliverySchedule.milkItems.milkType',
+        select: 'name'
+      })
+      .populate({
+        path: 'deliverySchedule.milkItems.subcategory',
+        select: 'name'
+      })
       .sort({ date: -1 })
       .skip(skip)
       .limit(parseInt(limit));
