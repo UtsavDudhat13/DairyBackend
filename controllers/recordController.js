@@ -23,15 +23,13 @@ const getRecords = async (req, res) => {
 
     // Date filters with proper time handling
     if (startDate && endDate) {
-      const start = new Date(startDate + 'T00:00:00.000Z');
-      const end = new Date(endDate + 'T23:59:59.999Z');
-
+      // Parse as local (IST), then convert to UTC
+      const start = new Date(new Date(startDate).setHours(0, 0, 0, 0) - 5.5 * 60 * 60 * 1000);
+      const end = new Date(new Date(endDate).setHours(23, 59, 59, 999) - 5.5 * 60 * 60 * 1000);
       query.date = {
         $gte: start,
         $lte: end
       };
-
-
     } else if (startDate) {
       // Only start date provided - from start date onwards
       const start = new Date(startDate + 'T00:00:00.000Z');

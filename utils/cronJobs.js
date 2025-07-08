@@ -26,7 +26,7 @@ const createDailyRecords = async () => {
 
 // Schedule the cron job to run at 11:59 PM every day
 const scheduleDailyRecords = () => {
-  // // For testing: Run every minute
+  // // // For testing: Run every minute
   // cron.schedule('* * * * *', () => {
   //   createDailyRecords();
   // });

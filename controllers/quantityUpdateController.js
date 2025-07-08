@@ -6,13 +6,13 @@ import Customer from '../models/Customer.js';
 // @access  Private/Admin
 const updateCustomerQuantity = async (req, res) => {
   try {
-    const { customerId, date, updateType, newQuantity, reason } = req.body;
+    const { customerId, date, time, milkType, subcategory, newQuantity, reason } = req.body;
 
     // Validate input
-    if (!customerId || !date || !updateType || newQuantity === undefined || !reason) {
+    if (!customerId || !date || !time || !milkType || !subcategory || newQuantity === undefined || !reason) {
       return res.status(400).json({
         success: false,
-        error: 'Please provide all required fields'
+        error: 'Please provide all required fields (customerId, date, time, milkType, subcategory, newQuantity, reason)'
       });
     }
 
@@ -25,15 +25,40 @@ const updateCustomerQuantity = async (req, res) => {
       });
     }
 
-    // Get the original quantity based on update type
-    const originalQuantity = updateType === 'morning' ? customer.morningQuantity : customer.eveningQuantity;
+    // Find the delivery time (morning/evening)
+    const delivery = customer.deliverySchedule.find(d => d.time === time);
+    if (!delivery) {
+      return res.status(404).json({
+        success: false,
+        error: `No delivery schedule found for time: ${time}`
+      });
+    }
+
+    // Find the milk item
+    delivery.milkItems.forEach(element => {
+      console.log(element.milkType)
+    });
+    const milkItem = delivery.milkItems.find(item =>
+      item.milkType.toString() === milkType &&
+      item.subcategory.toString() === subcategory
+    );
+    if (!milkItem) {
+      return res.status(404).json({
+        success: false,
+        error: 'Milk item not found for the given type and subcategory'
+      });
+    }
+
+    const originalQuantity = milkItem.quantity;
     const difference = newQuantity - originalQuantity;
 
-    // Check if a quantity update already exists for this date, customer, and update type
+    // Check if a quantity update already exists for this date, customer, time, milkType, and subcategory
     const existingUpdate = await QuantityUpdate.findOne({
       customer: customerId,
       date: new Date(date),
-      updateType
+      time,
+      milkType,
+      subcategory
     });
 
     let update;
@@ -47,7 +72,7 @@ const updateCustomerQuantity = async (req, res) => {
           newQuantity,
           difference,
           reason,
-          updatedBy: customerId,
+          isAccept: req.body.isAccept,
         },
         { new: true, runValidators: true }
       );
@@ -56,16 +81,19 @@ const updateCustomerQuantity = async (req, res) => {
       update = await QuantityUpdate.create({
         customer: customerId,
         date: new Date(date),
-        updateType,
+        time,
+        milkType,
+        subcategory,
         oldQuantity: originalQuantity,
         newQuantity,
         difference,
         reason,
-        updatedBy: customerId,
+        isAccept: req.body.isAccept,
       });
     }
 
-    console.log(update);
+    // Optionally, update the customer's deliverySchedule in-memory (not persisted here)
+    // milkItem.quantity = newQuantity;
 
     res.status(200).json({
       success: true,
@@ -101,7 +129,8 @@ const getQuantityUpdates = async (req, res) => {
 
     const updates = await QuantityUpdate.find(query)
       .populate('customer', 'name customerNo phoneNo')
-      .populate('updatedBy', 'name')
+      .populate('milkType', 'name')
+      .populate('subcategory', 'name')
       .sort({ date: -1, createdAt: -1 });
 
     res.json({
@@ -117,7 +146,44 @@ const getQuantityUpdates = async (req, res) => {
   }
 };
 
+// @desc    Delete a quantity update by ID
+// @route   DELETE /api/updates/quantity/:id
+// @access  Private/Admin
+const deleteQuantityUpdate = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const update = await QuantityUpdate.findById(id);
+    if (!update) {
+      return res.status(404).json({ success: false, error: 'Quantity update not found' });
+    }
+    await update.deleteOne();
+    res.json({ success: true, message: 'Quantity update deleted successfully' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+// @desc    Accept a quantity update by ID
+// @route   PATCH /api/updates/quantity/:id/accept
+// @access  Private/Admin
+const acceptQuantityUpdate = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const update = await QuantityUpdate.findById(id);
+    if (!update) {
+      return res.status(404).json({ success: false, error: 'Quantity update not found' });
+    }
+    update.isAccept = true;
+    await update.save();
+    res.json({ success: true, message: 'Quantity update accepted successfully' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
 export {
   updateCustomerQuantity,
-  getQuantityUpdates
+  getQuantityUpdates,
+  deleteQuantityUpdate,
+  acceptQuantityUpdate
 }; 

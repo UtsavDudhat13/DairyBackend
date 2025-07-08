@@ -13,7 +13,7 @@ const quantityUpdateSchema = mongoose.Schema(
       required: true,
       index: true,
     },
-    updateType: {
+    time: {
       type: String,
       enum: ['morning', 'evening'],
       required: true,
@@ -34,10 +34,19 @@ const quantityUpdateSchema = mongoose.Schema(
       type: String,
       required: true,
     },
-    updatedBy: {
+    milkType: {
       type: mongoose.Schema.Types.ObjectId,
-      ref: 'Admin',
+      ref: 'Category',
       required: true,
+    },
+    subcategory: {
+      type: mongoose.Schema.Types.ObjectId,
+      ref: 'Subcategory',
+      required: true,
+    },
+    isAccept: {
+      type: Boolean,
+      default: false,
     },
   },
   {
