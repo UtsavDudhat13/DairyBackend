@@ -136,6 +136,7 @@ export const generateCustomerMonthlyInvoice = async (req, res) => {
         if (!customer) {
             return res.status(404).json({ message: 'Customer not found' });
         }
+        console.log('Customer advance before invoice:', customer);
 
         // Get all records for this customer in the specified month
         const records = await Record.find({
@@ -167,6 +168,7 @@ export const generateCustomerMonthlyInvoice = async (req, res) => {
         });
 
         let invoice;
+        let advanceUsed = 0;
 
         if (existingInvoice) {
             // Update existing invoice
@@ -189,6 +191,45 @@ export const generateCustomerMonthlyInvoice = async (req, res) => {
             const dueDate = new Date(endDate);
             dueDate.setDate(dueDate.getDate() + 15);
 
+            // Apply customer advance to new invoice
+            let dueAmount = totalAmount;
+            let amountPaid = 0;
+            let payments = [];
+            let advanceUsed = 0;
+            if (customer.advance && customer.advance > 0) {
+                if (customer.advance >= totalAmount) {
+                    dueAmount = 0;
+                    advanceUsed = totalAmount;
+                    amountPaid = totalAmount;
+                    payments.push({
+                        amount: totalAmount,
+                        paymentDate: new Date(),
+                        paymentMethod: 'advance',
+                        notes: 'Advance applied from previous overpayment'
+                    });
+                    customer.advance = customer.advance - totalAmount;
+                } else {
+                    dueAmount = totalAmount - customer.advance;
+                    advanceUsed = customer.advance;
+                    amountPaid = customer.advance;
+                    payments.push({
+                        amount: customer.advance,
+                        paymentDate: new Date(),
+                        paymentMethod: 'advance',
+                        notes: 'Advance applied from previous overpayment'
+                    });
+                    customer.advance = 0;
+                }
+                await customer.save();
+            }
+
+            let status = 'pending';
+            if (amountPaid >= totalAmount) {
+                status = 'paid';
+            } else if (amountPaid > 0) {
+                status = 'partially_paid';
+            }
+
             invoice = await Invoice.create({
                 customer: id,
                 invoiceNumber,
@@ -196,14 +237,19 @@ export const generateCustomerMonthlyInvoice = async (req, res) => {
                 endDate,
                 totalQuantity,
                 totalAmount,
-                dueAmount: totalAmount, // Initially, due amount equals total amount
-                status: 'pending',
+                dueAmount, // Apply advance
+                amountPaid, // Add advance to amountPaid
+                payments, // Add advance payment record
+                status, // Set status based on amountPaid
                 dueDate,
                 items,
             });
+
+            // Ensure pre-save hook runs for dueAmount/status
+            await invoice.save();
         }
 
-        return res.status(existingInvoice ? 200 : 201).json(invoice);
+        return res.status(existingInvoice ? 200 : 201).json({ ...invoice.toObject(), advanceUsed });
     } catch (error) {
         return res.status(500).json({ message: error.message });
     }
@@ -344,6 +390,45 @@ export const generateBatchMonthlyInvoices = async (req, res) => {
                     const dueDate = new Date(endDate);
                     dueDate.setDate(dueDate.getDate() + 15);
 
+                    // Apply customer advance to new invoice
+                    let dueAmount = totalAmount;
+                    let amountPaid = 0;
+                    let payments = [];
+                    let advanceUsed = 0;
+                    if (customer.advance && customer.advance > 0) {
+                        if (customer.advance >= totalAmount) {
+                            dueAmount = 0;
+                            advanceUsed = totalAmount;
+                            amountPaid = totalAmount;
+                            payments.push({
+                                amount: totalAmount,
+                                paymentDate: new Date(),
+                                paymentMethod: 'advance',
+                                notes: 'Advance applied from previous overpayment'
+                            });
+                            customer.advance = customer.advance - totalAmount;
+                        } else {
+                            dueAmount = totalAmount - customer.advance;
+                            advanceUsed = customer.advance;
+                            amountPaid = customer.advance;
+                            payments.push({
+                                amount: customer.advance,
+                                paymentDate: new Date(),
+                                paymentMethod: 'advance',
+                                notes: 'Advance applied from previous overpayment'
+                            });
+                            customer.advance = 0;
+                        }
+                        await customer.save();
+                    }
+
+                    let status = 'pending';
+                    if (amountPaid >= totalAmount) {
+                        status = 'paid';
+                    } else if (amountPaid > 0) {
+                        status = 'partially_paid';
+                    }
+
                     invoice = await Invoice.create({
                         customer: customer._id,
                         invoiceNumber,
@@ -351,11 +436,16 @@ export const generateBatchMonthlyInvoices = async (req, res) => {
                         endDate,
                         totalQuantity,
                         totalAmount,
-                        dueAmount: totalAmount,
-                        status: 'pending',
+                        dueAmount, // Apply advance
+                        amountPaid, // Add advance to amountPaid
+                        payments, // Add advance payment record
+                        status, // Set status based on amountPaid
                         dueDate,
                         items,
                     });
+
+                    // Ensure pre-save hook runs for dueAmount/status
+                    await invoice.save();
 
                     results.created.push({
                         customer: customer._id,
@@ -363,6 +453,7 @@ export const generateBatchMonthlyInvoices = async (req, res) => {
                         invoiceId: invoice._id,
                         invoiceNumber: invoice.invoiceNumber,
                         totalAmount: invoice.totalAmount,
+                        advanceUsed,
                     });
                 }
             } catch (error) {
@@ -532,13 +623,6 @@ export const addPaymentToInvoice = async (req, res) => {
             return res.status(404).json({ message: 'Invoice not found' });
         }
 
-        // Check if payment amount exceeds due amount
-        if (amount > invoice.dueAmount) {
-            return res.status(400).json({
-                message: `Payment amount exceeds due amount. Maximum payment allowed: ${invoice.dueAmount}`
-            });
-        }
-
         // Generate transaction ID if not provided
         let finalTransactionId = transactionId;
 
@@ -581,7 +665,25 @@ export const addPaymentToInvoice = async (req, res) => {
             transactionId: finalTransactionId,
             notes,
         };
+
+        // Overpayment logic
+        let overpaidAmount = 0;
+        if (amount > invoice.dueAmount) {
+            overpaidAmount = amount - invoice.dueAmount;
+        }
+
+        // Add payment to invoice (pay up to dueAmount, rest is advance)
+        const paymentToApply = Math.min(amount, invoice.dueAmount);
+        payment.amount = paymentToApply;
         const updatedInvoice = await invoice.addPayment(payment);
+
+        // If overpaid, add to customer.advance
+        if (overpaidAmount > 0) {
+            const customer = await Customer.findById(invoice.customer._id);
+            customer.advance = (customer.advance || 0) + overpaidAmount;
+            await customer.save();
+        }
+
         return res.status(200).json(updatedInvoice);
     } catch (error) {
         return res.status(500).json({ message: error.message });

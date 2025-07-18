@@ -104,6 +104,10 @@ const customerSchema = mongoose.Schema(
       default: true,
       index: true,
     },
+    advance: {
+      type: Number,
+      default: 0,
+    },
   },
   {
     timestamps: true,

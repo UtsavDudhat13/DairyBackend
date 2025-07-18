@@ -91,7 +91,7 @@ const invoiceSchema = mongoose.Schema(
                 },
                 paymentMethod: {
                     type: String,
-                    enum: ['cash', 'online'],
+                    enum: ['cash', 'online', 'advance'],
                     default: 'cash',
                 },
                 transactionId: {

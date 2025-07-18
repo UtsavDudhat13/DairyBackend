@@ -1,9 +1,6 @@
 import QuantityUpdate from '../models/QuantityUpdate.js';
 import Customer from '../models/Customer.js';
 
-// @desc    Create quantity update for a specific day
-// @route   POST /api/updates/quantity
-// @access  Private/Admin
 const updateCustomerQuantity = async (req, res) => {
   try {
     const { customerId, date, time, milkType, subcategory, newQuantity, reason } = req.body;
@@ -17,7 +14,9 @@ const updateCustomerQuantity = async (req, res) => {
     }
 
     // Get customer
-    const customer = await Customer.findById(customerId);
+    const customer = await Customer.findById(customerId)
+      .populate('deliverySchedule.milkItems.milkType', 'name')
+      .populate('deliverySchedule.milkItems.subcategory', 'name');
     if (!customer) {
       return res.status(404).json({
         success: false,
@@ -39,8 +38,8 @@ const updateCustomerQuantity = async (req, res) => {
       console.log(element.milkType)
     });
     const milkItem = delivery.milkItems.find(item =>
-      item.milkType.toString() === milkType &&
-      item.subcategory.toString() === subcategory
+      item.milkType && item.milkType._id.toString() === milkType &&
+      item.subcategory && item.subcategory._id.toString() === subcategory
     );
     if (!milkItem) {
       return res.status(404).json({
@@ -51,6 +50,14 @@ const updateCustomerQuantity = async (req, res) => {
 
     const originalQuantity = milkItem.quantity;
     const difference = newQuantity - originalQuantity;
+
+    // Update the in-memory milkItem quantity and totalPrice
+    milkItem.quantity = newQuantity;
+    milkItem.totalPrice = milkItem.quantity * milkItem.pricePerUnit;
+
+    // Update delivery totals
+    delivery.totalQuantity = delivery.milkItems.reduce((sum, item) => sum + item.quantity, 0);
+    delivery.totalPrice = delivery.milkItems.reduce((sum, item) => sum + item.totalPrice, 0);
 
     // Check if a quantity update already exists for this date, customer, time, milkType, and subcategory
     const existingUpdate = await QuantityUpdate.findOne({
@@ -92,12 +99,10 @@ const updateCustomerQuantity = async (req, res) => {
       });
     }
 
-    // Optionally, update the customer's deliverySchedule in-memory (not persisted here)
-    // milkItem.quantity = newQuantity;
-
     res.status(200).json({
       success: true,
-      data: update
+      data: update,
+      deliverySchedule: customer.deliverySchedule
     });
   } catch (error) {
     res.status(500).json({
