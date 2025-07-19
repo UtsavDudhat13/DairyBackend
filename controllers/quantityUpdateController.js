@@ -112,9 +112,6 @@ const updateCustomerQuantity = async (req, res) => {
   }
 };
 
-// @desc    Get all quantity updates with filters
-// @route   GET /api/updates/quantity
-// @access  Private/Admin
 const getQuantityUpdates = async (req, res) => {
   try {
     const { startDate, endDate, customerId } = req.query;
@@ -133,15 +130,36 @@ const getQuantityUpdates = async (req, res) => {
     }
 
     const updates = await QuantityUpdate.find(query)
-      .populate('customer', 'name customerNo phoneNo')
+      .populate({
+        path: 'customer',
+        select: 'name customerNo phoneNo deliverySchedule',
+        populate: {
+          path: 'deliverySchedule.milkItems.milkType deliverySchedule.milkItems.subcategory',
+          select: 'name'
+        }
+      })
       .populate('milkType', 'name')
       .populate('subcategory', 'name')
       .sort({ date: -1, createdAt: -1 });
 
+    // Extract delivery schedules and clean up the data
+    const deliverySchedules = updates.map(update => update.customer?.deliverySchedule).filter(Boolean);
+
+    // Remove deliverySchedule from customer data in the updates
+    const cleanUpdates = updates.map(update => {
+      const updateObj = update.toObject();
+      if (updateObj.customer && updateObj.customer.deliverySchedule) {
+        const { deliverySchedule, ...customerWithoutSchedule } = updateObj.customer;
+        updateObj.customer = customerWithoutSchedule;
+      }
+      return updateObj;
+    });
+
     res.json({
       success: true,
       count: updates.length,
-      data: updates
+      data: cleanUpdates,
+      deliverySchedule: deliverySchedules
     });
   } catch (error) {
     res.status(500).json({
