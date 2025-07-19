@@ -39,7 +39,7 @@ router.route('/customer/:id')
   .get(protect, getCustomerInvoices);
 
 router.route('/:id')
-  .get(protect, admin, getInvoiceById)
+  .get(protect, getInvoiceById)
   .delete(protect, admin, deleteInvoice);
 
 router.route('/:id/status')
