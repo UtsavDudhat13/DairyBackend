@@ -142,8 +142,38 @@ const getQuantityUpdates = async (req, res) => {
       .populate('subcategory', 'name')
       .sort({ date: -1, createdAt: -1 });
 
-    // Extract delivery schedules and clean up the data
-    const deliverySchedules = updates.map(update => update.customer?.deliverySchedule).filter(Boolean);
+    // Get delivery schedule and apply updates to it (only in response)
+    let deliverySchedule = [];
+
+    if (updates.length > 0 && updates[0].customer?.deliverySchedule) {
+      // Create a deep copy of the delivery schedule
+      deliverySchedule = JSON.parse(JSON.stringify(updates[0].customer.deliverySchedule));
+
+      // Apply quantity updates to the copied delivery schedule
+      updates.forEach(update => {
+        // Find the matching delivery time
+        const delivery = deliverySchedule.find(d => d.time === update.time);
+        if (delivery) {
+          // Find the matching milk item using string comparison for ObjectIds
+          const milkItem = delivery.milkItems.find(item =>
+            item.milkType._id.toString() === update.milkType._id.toString() &&
+            item.subcategory._id.toString() === update.subcategory._id.toString()
+          );
+
+          if (milkItem) {
+            // Update quantities in the response copy only
+            milkItem.quantity = update.newQuantity;
+            milkItem.totalPrice = milkItem.quantity * milkItem.pricePerUnit;
+          }
+        }
+      });
+
+      // Recalculate delivery totals
+      deliverySchedule.forEach(delivery => {
+        delivery.totalQuantity = delivery.milkItems.reduce((sum, item) => sum + item.quantity, 0);
+        delivery.totalPrice = delivery.milkItems.reduce((sum, item) => sum + item.totalPrice, 0);
+      });
+    }
 
     // Remove deliverySchedule from customer data in the updates
     const cleanUpdates = updates.map(update => {
@@ -159,7 +189,7 @@ const getQuantityUpdates = async (req, res) => {
       success: true,
       count: updates.length,
       data: cleanUpdates,
-      deliverySchedule: deliverySchedules
+      deliverySchedule: deliverySchedule
     });
   } catch (error) {
     res.status(500).json({

@@ -36,7 +36,7 @@ router.route('/customer/:id/summary')
   .get(getCustomerInvoiceSummary);
 
 router.route('/customer/:id')
-  .get(protect, admin, getCustomerInvoices);
+  .get(protect, getCustomerInvoices);
 
 router.route('/:id')
   .get(protect, admin, getInvoiceById)
@@ -46,7 +46,7 @@ router.route('/:id/status')
   .put(protect, admin, updateInvoiceStatus);
 
 router.route('/:id/payment')
-  .post(protect, admin, addPaymentToInvoice);
+  .post(protect, addPaymentToInvoice);
 
 router.route('/:id/pdf')
   .get(generateModernInvoicePDF);
