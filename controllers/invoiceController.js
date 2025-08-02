@@ -989,6 +989,12 @@ export const generateDairyFormPDF = async (invoiceData, outputStream, options = 
         doc.text(mergedOptions.contactInfo.person2.name, 430, 85);
         doc.text(mergedOptions.contactInfo.person2.phone, 430, 105);
 
+        // Customer Name (below logo area with more space)
+        const customerName = invoiceData.customer?.name || mergedOptions.customer?.name || 'Customer Name';
+        doc.fillColor('black').font('Gujarati').fontSize(14);
+        doc.text('ગ્રાહક નામ:', 30, 135);
+        doc.text(customerName, 120, 135);
+
         // Extract data from invoice
         const startDate = new Date(invoiceData.startDate);
         const monthText = getGujaratiMonth(startDate.getMonth() + 1);
@@ -1045,25 +1051,27 @@ export const generateDairyFormPDF = async (invoiceData, outputStream, options = 
         }
 
 
-        // Month/Rate/Place
+        // Month/Rate/Place (moved down to give space for customer name)
         doc.font('Gujarati').fontSize(14);
-        doc.text('માસ:', 30, 145);
-        doc.text(`${monthText} ${yearText}`, 95, 145);
-        doc.text('ભાવ:', 220, 145);
-        doc.text(priceDisplay, 275, 145);
-        // doc.text('ઠે.:', 400, 145);
-        // doc.text(customerAddress, 445, 145);
+        doc.text('માસ:', 30, 165);
+        doc.text(`${monthText} ${yearText}`, 95, 165);
+        doc.text('ભાવ:', 220, 165);
+        doc.text(priceDisplay, 275, 165);
+        // doc.text('ઠે.:', 400, 165);
+        // doc.text(customerAddress, 445, 165);
 
-        // Underlines for Month/Rate/Place
-        doc.moveTo(70, 165).lineTo(200, 165).stroke();
-        doc.moveTo(255, 165).lineTo(380, 165).stroke();
-        // doc.moveTo(420, 165).lineTo(550, 165).stroke();
+        // Underlines for Month/Rate/Place and Customer Name
+        doc.moveTo(70, 185).lineTo(200, 185).stroke();
+        doc.moveTo(255, 185).lineTo(380, 185).stroke();
+        // Customer name underline
+        doc.moveTo(120, 150).lineTo(400, 150).stroke();
+        // doc.moveTo(420, 185).lineTo(550, 185).stroke();
 
-        // Table dimensions
+        // Table dimensions (moved down to accommodate customer name)
         const marginLeft = 30;
         const marginRight = 30;
         const tableWidth = doc.page.width - marginLeft - marginRight;
-        const startY = 175;
+        const startY = 195; // Moved down from 175 to 195
 
         // Each block: 1 date + 2 (સવાર) + 2 (સાંજ) = 5 columns per block, but for 10 days per row, we need to repeat
         // For 1-10, 11-20, 21-30 (3 blocks)

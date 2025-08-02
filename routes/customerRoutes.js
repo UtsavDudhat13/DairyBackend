@@ -6,6 +6,7 @@ import {
   updateCustomer,
   deleteCustomer,
   authCustomer,
+  getCustomersWithAdvance,
 } from '../controllers/customerController.js';
 import { protect, admin } from '../middleware/authMiddleware.js';
 import Customer from '../models/Customer.js';
@@ -15,6 +16,10 @@ const router = express.Router();
 router.route('/')
   .get(protect, admin, getCustomers)
   .post(protect, admin, createCustomer);
+
+// Get customers with advance payments
+router.route('/with-advance')
+  .get(protect, admin, getCustomersWithAdvance);
 
 router.route('/login')
   .post(authCustomer);

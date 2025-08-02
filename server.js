@@ -12,6 +12,7 @@ import recordRoutes from './routes/recordRoutes.js'
 import quantityUpdateRoutes from './routes/quantityUpdateRoutes.js'
 import scheduleDailyRecords from './utils/cronJobs.js'
 import invoiceRoutes from './routes/invoiceRoutes.js';
+import systemConfigRoutes from './routes/systemConfigRoutes.js';
 // Add this line
 
 dotenv.config();
@@ -32,6 +33,7 @@ app.use('/api/holidays', holidayRoutes);
 app.use('/api/records', recordRoutes);
 app.use('/api/updates/quantity', quantityUpdateRoutes);
 app.use('/api/invoices', invoiceRoutes);
+app.use('/api/config', systemConfigRoutes);
 
 scheduleDailyRecords();
 

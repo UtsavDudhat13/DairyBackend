@@ -295,6 +295,18 @@ const authCustomer = tryCatch(async (req, res) => {
   }
 });
 
+// @desc    Get customers with advance payments
+// @route   GET /api/customers/with-advance
+// @access  Private/Admin
+const getCustomersWithAdvance = tryCatch(async (req, res) => {
+  // Get all customers with advance > 0
+  const customers = await Customer.find({
+    advance: { $gt: 0 }
+  }).select('-password').sort({ advance: -1 });
+
+  res.json(customers);
+});
+
 export {
   getCustomers,
   getCustomerById,
@@ -302,4 +314,5 @@ export {
   updateCustomer,
   deleteCustomer,
   authCustomer,
+  getCustomersWithAdvance,
 };

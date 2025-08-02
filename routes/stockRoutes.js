@@ -1,11 +1,12 @@
 import express from 'express';
-import { 
+import {
   addStockEntry,
   getStockEntries,
   getStockEntryById,
   updateStockEntry,
   deleteStockEntry,
-  getStockSummary 
+  getStockSummary,
+  getStockByCategory
 } from '../controllers/stockController.js';
 
 const router = express.Router();
@@ -18,6 +19,10 @@ router.route('/')
 // Stock summary route
 router.route('/summary')
   .get(getStockSummary);
+
+// Stock by category route
+router.route('/categories')
+  .get(getStockByCategory);
 
 // Stock entry by ID routes
 router.route('/:id')

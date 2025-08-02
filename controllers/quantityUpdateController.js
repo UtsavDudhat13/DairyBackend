@@ -33,10 +33,6 @@ const updateCustomerQuantity = async (req, res) => {
       });
     }
 
-    // Find the milk item
-    delivery.milkItems.forEach(element => {
-      console.log(element.milkType)
-    });
     const milkItem = delivery.milkItems.find(item =>
       item.milkType && item.milkType._id.toString() === milkType &&
       item.subcategory && item.subcategory._id.toString() === subcategory
@@ -198,6 +194,8 @@ const getQuantityUpdates = async (req, res) => {
     });
   }
 };
+
+
 
 // @desc    Delete a quantity update by ID
 // @route   DELETE /api/updates/quantity/:id

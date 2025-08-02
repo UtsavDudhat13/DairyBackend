@@ -31,24 +31,6 @@ const loginAdmin = async (req, res) => {
     res.status(500).json({ message: 'Server error', error: error.message });
   }
 };
-
-// @desc    Get admin profile
-// @route   GET /api/auth/profile
-// @access  Private/Admin
-const getAdminProfile = async (req, res) => {
-  try {
-    const admin = await Admin.findById(req.admin._id).select('-password');
-
-    if (admin) {
-      res.json(admin);
-    } else {
-      res.status(404).json({ message: 'Admin not found' });
-    }
-  } catch (error) {
-    res.status(500).json({ message: 'Server error', error: error.message });
-  }
-};
-
 // @desc    Create admin (for seeding purposes)
 // @route   POST /api/auth/seed
 // @access  Public (but should be secured in production)
@@ -84,4 +66,4 @@ const createAdmin = async (req, res) => {
   }
 };
 
-export { loginAdmin, getAdminProfile, createAdmin };
+export { loginAdmin, createAdmin };

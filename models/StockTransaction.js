@@ -1,6 +1,11 @@
 import mongoose from 'mongoose';
 
 const stockEntrySchema = new mongoose.Schema({
+  category: {
+    type: mongoose.Schema.Types.ObjectId,
+    ref: 'Category',
+    required: true,
+  },
   entryType: {
     type: String,
     required: true,
@@ -25,6 +30,8 @@ const stockEntrySchema = new mongoose.Schema({
 // Create indexes for faster queries
 stockEntrySchema.index({ entryDate: 1 });
 stockEntrySchema.index({ entryType: 1 });
+stockEntrySchema.index({ category: 1 });
+stockEntrySchema.index({ category: 1, entryDate: 1 });
 
 const StockEntry = mongoose.model('StockEntry', stockEntrySchema);
 
