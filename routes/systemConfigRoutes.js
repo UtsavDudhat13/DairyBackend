@@ -13,7 +13,7 @@ const router = express.Router();
 
 // System configuration routes
 router.route('/')
-    .get(protect, admin, getSystemConfig)
+    .get(protect, getSystemConfig)
     .put(protect, admin, updateSystemConfig);
 
 // Milkman management routes
