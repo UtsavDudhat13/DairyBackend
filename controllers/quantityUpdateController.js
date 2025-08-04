@@ -157,15 +157,34 @@ const getQuantityUpdates = async (req, res) => {
           );
 
           if (milkItem) {
-            // Update quantities in the response copy only
+            // Update quantities and add status information
+            milkItem.originalQuantity = update.oldQuantity;
             milkItem.quantity = update.newQuantity;
             milkItem.totalPrice = milkItem.quantity * milkItem.pricePerUnit;
+
+            // Add update status information
+            milkItem.updateStatus = {
+              hasUpdate: true,
+              status: update.status,
+              isAccepted: update.isAccept,
+              difference: update.difference,
+              reason: update.reason,
+              updateDate: update.date,
+              updateId: update._id
+            };
           }
         }
       });
 
-      // Recalculate delivery totals
+      // Mark items without updates
       deliverySchedule.forEach(delivery => {
+        delivery.milkItems.forEach(milkItem => {
+          if (!milkItem.updateStatus) {
+            milkItem.updateStatus = null;
+          }
+        });
+
+        // Recalculate delivery totals
         delivery.totalQuantity = delivery.milkItems.reduce((sum, item) => sum + item.quantity, 0);
         delivery.totalPrice = delivery.milkItems.reduce((sum, item) => sum + item.totalPrice, 0);
       });
