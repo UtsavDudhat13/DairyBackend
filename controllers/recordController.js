@@ -232,6 +232,11 @@ const createDailyRecords = async (req, res) => {
           date: { $gte: startOfDay, $lte: endOfDay }
         });
 
+        if (updates.isAccept === false) {
+          console.log(`Skipping record creation for ${customer.name} due to ${updates.reason}`);
+          continue; // Skip if updates are not accepted
+        }
+
         // Prepare new deliverySchedule for the record
         const recordDeliverySchedule = [];
         let totalDailyQuantity = 0;

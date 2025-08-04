@@ -225,8 +225,27 @@ const acceptQuantityUpdate = async (req, res) => {
       return res.status(404).json({ success: false, error: 'Quantity update not found' });
     }
     update.isAccept = true;
+    update.status = 'accepted';
     await update.save();
     res.json({ success: true, message: 'Quantity update accepted successfully' });
+  } catch (error) {
+    res.status(500).json({ success: false, error: error.message });
+  }
+};
+
+const rejectQuantityUpdate = async (req, res) => {
+  try {
+    const { id } = req.params;
+    const { reason } = req.body;
+    const update = await QuantityUpdate.findById(id);
+    if (!update) {
+      return res.status(404).json({ success: false, error: 'Quantity update not found' });
+    }
+    update.isAccept = false;
+    update.reason = reason || 'No reason provided';
+    update.status = 'rejected'; // Set status to rejected
+    await update.save();
+    res.json({ success: true, message: 'Quantity update rejected successfully' });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -236,5 +255,6 @@ export {
   updateCustomerQuantity,
   getQuantityUpdates,
   deleteQuantityUpdate,
-  acceptQuantityUpdate
+  acceptQuantityUpdate,
+  rejectQuantityUpdate
 }; 
