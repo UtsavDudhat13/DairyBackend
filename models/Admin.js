@@ -1,5 +1,5 @@
 import mongoose from 'mongoose';
-import bcrypt from 'bcryptjs';
+import CryptoJS from 'crypto-js';
 
 const adminSchema = mongoose.Schema(
   {
@@ -23,9 +23,8 @@ const adminSchema = mongoose.Schema(
   }
 );
 
-// Method to check if entered password matches the hashed password
 adminSchema.methods.matchPassword = async function (enteredPassword) {
-  return await bcrypt.compare(enteredPassword, this.password);
+  return await (enteredPassword === decryptPassword(this.password, "Ramdev-Dairy-2025"));
 };
 
 // Middleware to hash password before saving
@@ -33,11 +32,12 @@ adminSchema.pre('save', async function (next) {
   if (!this.isModified('password')) {
     next();
   }
-
-  const salt = await bcrypt.genSalt(10);
-  this.password = await bcrypt.hash(this.password, salt);
+  this.password = CryptoJS.AES.encrypt(this.password, "Ramdev-Dairy-2025").toString();
 });
-
+function decryptPassword(cipherText, secretKey) {
+  const bytes = CryptoJS.AES.decrypt(cipherText, secretKey);
+  return bytes.toString(CryptoJS.enc.Utf8);
+}
 const Admin = mongoose.model('Admin', adminSchema);
 
 export default Admin;
