@@ -108,111 +108,6 @@ const updateCustomerQuantity = async (req, res) => {
   }
 };
 
-// const getQuantityUpdates = async (req, res) => {
-//   try {
-//     const { startDate, endDate, customerId } = req.query;
-
-//     const query = {};
-
-//     if (startDate && endDate) {
-//       query.date = {
-//         $gte: new Date(startDate),
-//         $lte: new Date(endDate)
-//       };
-//     }
-
-//     if (customerId) {
-//       query.customer = customerId;
-//     }
-
-//     const updates = await QuantityUpdate.find(query)
-//       .populate({
-//         path: 'customer',
-//         select: 'name customerNo phoneNo deliverySchedule',
-//         populate: {
-//           path: 'deliverySchedule.milkItems.milkType deliverySchedule.milkItems.subcategory',
-//           select: 'name'
-//         }
-//       })
-//       .populate('milkType', 'name')
-//       .populate('subcategory', 'name')
-//       .sort({ date: -1, createdAt: -1 });
-
-//     // Get delivery schedule and apply updates to it (only in response)
-//     let deliverySchedule = [];
-
-//     if (updates.length > 0 && updates[0].customer?.deliverySchedule) {
-//       // Create a deep copy of the delivery schedule
-//       deliverySchedule = JSON.parse(JSON.stringify(updates[0].customer.deliverySchedule));
-
-//       // Apply quantity updates to the copied delivery schedule
-//       updates.forEach(update => {
-//         // Find the matching delivery time
-//         const delivery = deliverySchedule.find(d => d.time === update.time);
-//         if (delivery) {
-//           // Find the matching milk item using string comparison for ObjectIds
-//           const milkItem = delivery.milkItems.find(item =>
-//             item.milkType._id.toString() === update.milkType._id.toString() &&
-//             item.subcategory._id.toString() === update.subcategory._id.toString()
-//           );
-
-//           if (milkItem) {
-//             // Update quantities and add status information
-//             milkItem.originalQuantity = update.oldQuantity;
-//             milkItem.quantity = update.newQuantity;
-//             milkItem.totalPrice = milkItem.quantity * milkItem.pricePerUnit;
-
-//             // Add update status information
-//             milkItem.updateStatus = {
-//               hasUpdate: true,
-//               status: update.status,
-//               isAccepted: update.isAccept,
-//               difference: update.difference,
-//               reason: update.reason,
-//               updateDate: update.date,
-//               updateId: update._id
-//             };
-//           }
-//         }
-//       });
-
-//       // Mark items without updates
-//       deliverySchedule.forEach(delivery => {
-//         delivery.milkItems.forEach(milkItem => {
-//           if (!milkItem.updateStatus) {
-//             milkItem.updateStatus = null;
-//           }
-//         });
-
-//         // Recalculate delivery totals
-//         delivery.totalQuantity = delivery.milkItems.reduce((sum, item) => sum + item.quantity, 0);
-//         delivery.totalPrice = delivery.milkItems.reduce((sum, item) => sum + item.totalPrice, 0);
-//       });
-//     }
-
-//     // Remove deliverySchedule from customer data in the updates
-//     const cleanUpdates = updates.map(update => {
-//       const updateObj = update.toObject();
-//       if (updateObj.customer && updateObj.customer.deliverySchedule) {
-//         const { deliverySchedule, ...customerWithoutSchedule } = updateObj.customer;
-//         updateObj.customer = customerWithoutSchedule;
-//       }
-//       return updateObj;
-//     });
-
-//     res.json({
-//       success: true,
-//       count: updates.length,
-//       data: cleanUpdates,
-//       deliverySchedule: deliverySchedule
-//     });
-//   } catch (error) {
-//     res.status(500).json({
-//       success: false,
-//       error: error.message
-//     });
-//   }
-// };
 
 const getQuantityUpdates = async (req, res) => {
   try {
@@ -251,45 +146,71 @@ const getQuantityUpdates = async (req, res) => {
       // Create a deep copy of the delivery schedule
       deliverySchedule = JSON.parse(JSON.stringify(updates[0].customer.deliverySchedule));
 
-      // Apply quantity updates to the copied delivery schedule
+      // Group updates by delivery time, milk type, and subcategory
+      const updatesByItem = {};
+
       updates.forEach(update => {
+        const key = `${update.time}-${update.milkType._id}-${update.subcategory._id}`;
+        if (!updatesByItem[key]) {
+          updatesByItem[key] = [];
+        }
+        updatesByItem[key].push(update);
+      });
+
+      // Apply quantity updates to the copied delivery schedule
+      Object.entries(updatesByItem).forEach(([key, itemUpdates]) => {
+        const latestUpdate = itemUpdates[0]; // Most recent update (already sorted by date desc)
+
         // Find the matching delivery time
-        const delivery = deliverySchedule.find(d => d.time === update.time);
+        const delivery = deliverySchedule.find(d => d.time === latestUpdate.time);
         if (delivery) {
           // Find the matching milk item using string comparison for ObjectIds
           const milkItem = delivery.milkItems.find(item =>
-            item.milkType._id.toString() === update.milkType._id.toString() &&
-            item.subcategory._id.toString() === update.subcategory._id.toString()
+            item.milkType._id.toString() === latestUpdate.milkType._id.toString() &&
+            item.subcategory._id.toString() === latestUpdate.subcategory._id.toString()
           );
 
           if (milkItem) {
-            // Store original quantity before any modifications
-            milkItem.originalQuantity = update.oldQuantity;
+            // Store customer's default quantity
+            milkItem.originalQuantity = milkItem.quantity;
 
-            // Check update status and set quantity accordingly
-            if (update.status === 'rejected' || update.isAccept === false) {
-              // If rejected, keep the default/original quantity
-              milkItem.quantity = update.oldQuantity;
-              milkItem.totalPrice = milkItem.quantity * milkItem.pricePerUnit;
-            } else if (update.status === 'accepted' || update.isAccept === true) {
-              // If accepted, use the new quantity
-              milkItem.quantity = update.newQuantity;
-              milkItem.totalPrice = milkItem.quantity * milkItem.pricePerUnit;
+            let quantityToShow;
+
+            // Determine quantity based on status
+            if (latestUpdate.status === 'pending' || latestUpdate.status === 'accepted' || latestUpdate.isAccept === true) {
+              // For pending or accepted, show the updated quantity
+              quantityToShow = latestUpdate.newQuantity;
+            } else if (latestUpdate.status === 'rejected' || latestUpdate.isAccept === false) {
+              // For rejected, find the last accepted quantity
+              const lastAcceptedUpdate = itemUpdates.find(update =>
+                update.status === 'accepted' || update.isAccept === true
+              );
+
+              if (lastAcceptedUpdate) {
+                // Use last accepted quantity
+                quantityToShow = lastAcceptedUpdate.newQuantity;
+              } else {
+                // No accepted quantity found, use customer's default quantity
+                quantityToShow = milkItem.originalQuantity;
+              }
             } else {
-              // If pending, show the requested new quantity
-              milkItem.quantity = update.newQuantity;
-              milkItem.totalPrice = milkItem.quantity * milkItem.pricePerUnit;
+              // Default case - use updated quantity
+              quantityToShow = latestUpdate.newQuantity;
             }
+
+            // Update quantity and price
+            milkItem.quantity = quantityToShow;
+            milkItem.totalPrice = milkItem.quantity * milkItem.pricePerUnit;
 
             // Add update status information
             milkItem.updateStatus = {
               hasUpdate: true,
-              status: update.status,
-              isAccepted: update.isAccept,
-              difference: update.difference,
-              reason: update.reason,
-              updateDate: update.date,
-              updateId: update._id
+              status: latestUpdate.status || 'pending',
+              isAccepted: latestUpdate.isAccept,
+              difference: latestUpdate.difference,
+              reason: latestUpdate.reason,
+              updateDate: latestUpdate.date,
+              updateId: latestUpdate._id
             };
           }
         }
@@ -300,6 +221,8 @@ const getQuantityUpdates = async (req, res) => {
         delivery.milkItems.forEach(milkItem => {
           if (!milkItem.updateStatus) {
             milkItem.updateStatus = null;
+            // Keep original quantity for items without updates
+            milkItem.originalQuantity = milkItem.quantity;
           }
         });
 
@@ -393,4 +316,4 @@ export {
   deleteQuantityUpdate,
   acceptQuantityUpdate,
   rejectQuantityUpdate
-}; 
+};
