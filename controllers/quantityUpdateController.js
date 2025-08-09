@@ -75,7 +75,8 @@ const updateCustomerQuantity = async (req, res) => {
           newQuantity,
           difference,
           reason,
-          isAccept: req.body.isAccept,
+          status: "pending",
+          isAccept: "false",
         },
         { new: true, runValidators: true }
       );
