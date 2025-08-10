@@ -307,6 +307,8 @@ const getQuantityUpdates = async (req, res) => {
         // Recalculate delivery totals
         delivery.totalQuantity = delivery.milkItems.reduce((sum, item) => sum + item.quantity, 0);
         delivery.totalPrice = delivery.milkItems.reduce((sum, item) => sum + item.totalPrice, 0);
+        // Add lastQuantity to each milk item
+
       });
     }
 
@@ -318,6 +320,15 @@ const getQuantityUpdates = async (req, res) => {
         updateObj.customer = customerWithoutSchedule;
       }
       return updateObj;
+    });
+
+    // Add lastQuantity to each milk item
+    deliverySchedule.forEach(delivery => {
+      delivery.milkItems.forEach(milkItem => {
+        const update = updates.find(u => u.milkType._id.toString() === milkItem.milkType._id.toString() &&
+          u.subcategory._id.toString() === milkItem.subcategory._id.toString());
+        milkItem.lastQuantity = update ? update.lastQuantity : 0;
+      });
     });
 
     res.json({
@@ -356,13 +367,15 @@ const deleteQuantityUpdate = async (req, res) => {
 // @access  Private/Admin
 const acceptQuantityUpdate = async (req, res) => {
   try {
-    const { id } = req.params;
+    const { id, lastUpdated } = req.body;
     const update = await QuantityUpdate.findById(id);
     if (!update) {
       return res.status(404).json({ success: false, error: 'Quantity update not found' });
     }
     update.isAccept = true;
     update.status = 'accepted';
+    console.log('Last Updated:', lastUpdated);
+    update.lastQuantity = lastUpdated;
     await update.save();
     res.json({ success: true, message: 'Quantity update accepted successfully' });
   } catch (error) {

@@ -52,7 +52,11 @@ const quantityUpdateSchema = mongoose.Schema(
       type: String,
       enum: ['pending', 'accepted', 'rejected'],
       default: 'pending',
-    }
+    },
+    lastQuantity: {
+      type: Number,
+      default: 0, // Default value for lastQuantity
+    },
   },
   {
     timestamps: true,
