@@ -183,17 +183,7 @@ const getQuantityUpdates = async (req, res) => {
               quantityToShow = latestUpdate.newQuantity;
             } else if (latestUpdate.status === 'rejected' || latestUpdate.isAccept === false) {
               // For rejected, find the last accepted quantity
-              const lastAcceptedUpdate = itemUpdates.find(update =>
-                update.status === 'accepted' || update.isAccept === true
-              );
-
-              if (lastAcceptedUpdate) {
-                // Use last accepted quantity
-                quantityToShow = lastAcceptedUpdate.newQuantity;
-              } else {
-                // No accepted quantity found, use customer's default quantity
-                quantityToShow = milkItem.originalQuantity;
-              }
+              quantityToShow = latestUpdate.lastQuantity;
             } else {
               // Default case - use updated quantity
               quantityToShow = latestUpdate.newQuantity;
@@ -300,7 +290,7 @@ const acceptQuantityUpdate = async (req, res) => {
     console.log('Last Updated:', lastUpdated);
     update.lastQuantity = lastUpdated;
     await update.save();
-    res.json({ success: true, message: 'Quantity update accepted successfully' });
+    res.json({ success: true, message: 'Quantity update accepted successfully', data: update });
   } catch (error) {
     res.status(500).json({ success: false, error: error.message });
   }
@@ -317,6 +307,7 @@ const rejectQuantityUpdate = async (req, res) => {
     update.isAccept = false;
     update.reason = reason || 'No reason provided';
     update.status = 'rejected'; // Set status to rejected
+
     await update.save();
     res.json({ success: true, message: 'Quantity update rejected successfully' });
   } catch (error) {
