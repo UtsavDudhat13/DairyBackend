@@ -274,10 +274,6 @@ const deleteQuantityUpdate = async (req, res) => {
     res.status(500).json({ success: false, error: error.message });
   }
 };
-
-// @desc    Accept a quantity update by ID
-// @route   PATCH /api/updates/quantity/:id/accept
-// @access  Private/Admin
 const acceptQuantityUpdate = async (req, res) => {
   try {
     const { id, lastUpdated } = req.body;
