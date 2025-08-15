@@ -21,8 +21,20 @@ connectDB();
 
 const app = express();
 
-app.use(cors());
+app.use(cors({
+  origin: ['http://91.108.105.15'],
+  credentials: true
+}));
+
+// Handle OPTIONS preflight requests explicitly
+app.options('*', cors({
+  origin: ['http://91.108.105.15'],
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
+  allowedHeaders: ['Content-Type', 'Authorization', 'Origin', 'X-Requested-With', 'Accept'],
+  credentials: true,
+}));
 app.use(express.json());
+
 
 app.use('/api/auth', authRoutes);
 app.use('/api/categories', categoryRoutes);

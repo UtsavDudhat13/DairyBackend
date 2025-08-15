@@ -1,4 +1,6 @@
 import Customer from "../models/Customer.js";
+import Record from "../models/Record.js";
+import Holiday from "../models/Holiday.js";
 import generateToken from "../utils/generateToken.js";
 
 // Create a wrapper to handle errors in async functions
@@ -145,9 +147,158 @@ function calculateMilkItemTotals(deliverySchedule) {
   });
 }
 
-// @desc    Create a customer
-// @route   POST /api/customers
-// @access  Private/Admin
+// Helper function to check if a date is a holiday
+const checkIfHoliday = async (date) => {
+  try {
+    const checkDate = new Date(date);
+    checkDate.setHours(0, 0, 0, 0);
+
+    const currentYear = checkDate.getFullYear();
+    const currentMonth = checkDate.getMonth();
+    const currentDay = checkDate.getDate();
+
+    // Check for non-recurring holidays (exact date match)
+    const nonRecurringHoliday = await Holiday.findOne({
+      date: {
+        $gte: checkDate,
+        $lt: new Date(checkDate.getTime() + 24 * 60 * 60 * 1000) // Next day
+      },
+      isRecurringYearly: false
+    });
+
+    if (nonRecurringHoliday) {
+      return true;
+    }
+
+    // Check for recurring holidays (same month and day, any year)
+    const recurringHolidays = await Holiday.find({
+      isRecurringYearly: true
+    });
+
+    for (const holiday of recurringHolidays) {
+      const holidayDate = new Date(holiday.date);
+      if (holidayDate.getMonth() === currentMonth &&
+        holidayDate.getDate() === currentDay) {
+        return true;
+      }
+    }
+
+    return false;
+  } catch (error) {
+    console.error('Error checking holiday:', error);
+    // In case of error, assume it's not a holiday to avoid blocking record creation
+    return false;
+  }
+};
+
+// Helper function to create historical records for a customer
+const createHistoricalRecords = async (customer, joinedDate) => {
+  try {
+    // Parse the joined date from Indian format (DD/MM/YYYY) to JavaScript Date
+    const parts = joinedDate.split('/');
+    if (parts.length !== 3) {
+      console.error('Invalid date format for joinedDate:', joinedDate);
+      return { success: false, error: 'Invalid date format' };
+    }
+
+    const startDate = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+    startDate.setHours(0, 0, 0, 0);
+
+    // Get yesterday's date (one day before current date)
+    const yesterday = new Date();
+    yesterday.setDate(yesterday.getDate() - 1);
+    yesterday.setHours(23, 59, 59, 999);
+
+    // If joined date is in the future, no need to create historical records
+    // This is a more explicit check that returns a clear message
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    if (startDate > today) {
+      return {
+        success: true,
+        count: 0,
+        message: `No historical records created because the joined date (${joinedDate}) is in the future`
+      };
+    }
+
+    // Create records for each day from joined date to yesterday
+    const createdRecords = [];
+    let currentDate = new Date(startDate);
+
+    while (currentDate <= yesterday) {
+      // Check if a record already exists for this date
+      const existingRecord = await Record.findOne({
+        customer: customer._id,
+        date: new Date(currentDate)
+      });
+
+      // Check if this date is a holiday
+      const isHoliday = await checkIfHoliday(currentDate);
+
+      // If no record exists and it's not a holiday, create a new record
+      if (!existingRecord && !isHoliday) {
+        // Prepare new deliverySchedule for the record
+        const recordDeliverySchedule = [];
+        let totalDailyQuantity = 0;
+        let totalDailyPrice = 0;
+
+        for (const delivery of customer.deliverySchedule) {
+          const recordMilkItems = [];
+          let deliveryTotalQuantity = 0;
+          let deliveryTotalPrice = 0;
+
+          for (const milkItem of delivery.milkItems) {
+            const quantity = milkItem.quantity;
+            const pricePerUnit = milkItem.pricePerUnit;
+            const totalPrice = quantity * pricePerUnit;
+
+            recordMilkItems.push({
+              milkType: milkItem.milkType,
+              subcategory: milkItem.subcategory,
+              quantity,
+              pricePerUnit,
+              totalPrice
+            });
+            deliveryTotalQuantity += quantity;
+            deliveryTotalPrice += totalPrice;
+          }
+
+          recordDeliverySchedule.push({
+            time: delivery.time,
+            milkItems: recordMilkItems,
+            totalQuantity: deliveryTotalQuantity,
+            totalPrice: deliveryTotalPrice
+          });
+          totalDailyQuantity += deliveryTotalQuantity;
+          totalDailyPrice += deliveryTotalPrice;
+        }
+
+        // Create the record
+        const record = await Record.create({
+          customer: customer._id,
+          date: new Date(currentDate),
+          deliverySchedule: recordDeliverySchedule,
+          totalDailyQuantity,
+          totalDailyPrice
+        });
+
+        createdRecords.push(record);
+      }
+
+      // Move to the next day
+      currentDate.setDate(currentDate.getDate() + 1);
+    }
+
+    return {
+      success: true,
+      count: createdRecords.length,
+      message: `Created ${createdRecords.length} historical records`
+    };
+  } catch (error) {
+    console.error('Error creating historical records:', error);
+    return { success: false, error: error.message };
+  }
+};
 const createCustomer = tryCatch(async (req, res) => {
   let {
     name,
@@ -155,7 +306,8 @@ const createCustomer = tryCatch(async (req, res) => {
     address,
     deliverySchedule,
     password,
-    username
+    username,
+    joinedDate
   } = req.body;
 
   // Check if customer with phone number already exists
@@ -182,12 +334,24 @@ const createCustomer = tryCatch(async (req, res) => {
     deliverySchedule,
     username,
     password,
+    joinedDate, // Add the joinedDate field
   });
 
   const createdCustomer = await customer.save();
 
   if (createdCustomer) {
-    res.status(201).json(createdCustomer);
+    // Create historical records if the customer has a past join date
+    let historicalRecordsResult = { success: true, count: 0 };
+
+    if (joinedDate) {
+      historicalRecordsResult = await createHistoricalRecords(createdCustomer, joinedDate);
+      console.log('Historical records creation result:', historicalRecordsResult);
+    }
+
+    res.status(201).json({
+      ...createdCustomer.toObject(),
+      historicalRecords: historicalRecordsResult
+    });
   } else {
     res.status(400).json({ message: "Invalid customer data" });
   }
@@ -205,6 +369,11 @@ const updateCustomer = tryCatch(async (req, res) => {
     customer.address = req.body.address || customer.address;
     customer.isActive =
       req.body.isActive !== undefined ? req.body.isActive : customer.isActive;
+
+    // Update joinedDate if provided
+    if (req.body.joinedDate) {
+      customer.joinedDate = req.body.joinedDate;
+    }
 
     // Update delivery schedule if provided
     if (req.body.deliverySchedule) {
@@ -245,13 +414,12 @@ const deleteCustomer = tryCatch(async (req, res) => {
     return res.status(404).json({ message: "Customer not found" });
   }
 
-  // Check if customer has any associated data (like orders, deliveries, etc.)
-  // This is a placeholder - implement actual checks based on your data model
-  const hasAssociatedData = false; // Replace with actual checks
+  // Check if customer has any associated records
+  const customerRecords = await Record.countDocuments({ customer: customer._id });
 
-  if (hasAssociatedData) {
+  if (customerRecords > 0) {
     return res.status(400).json({
-      message: "Cannot delete customer with associated data. Please remove associated data first."
+      message: `Cannot delete customer as they have ${customerRecords} associated records. Please remove the records first or deactivate the customer instead.`
     });
   }
 
@@ -286,6 +454,7 @@ const authCustomer = tryCatch(async (req, res) => {
       totalDailyPrice: customer.totalDailyPrice,
       username: customer.username,
       isActive: customer.isActive,
+      joinedDate: customer.joinedDate,
       token: generateToken(customer._id),
       createdAt: customer.createdAt,
       updatedAt: customer.updatedAt

@@ -219,6 +219,22 @@ const createDailyRecords = async (req, res) => {
     endOfDay.setHours(23, 59, 59, 999);
 
     for (const customer of customers) {
+      // Check if customer's joined date is in the future
+      if (customer.joinedDate) {
+        // Parse the joined date from Indian format (DD/MM/YYYY)
+        const parts = customer.joinedDate.split('/');
+        if (parts.length === 3) {
+          const joinedDate = new Date(parseInt(parts[2]), parseInt(parts[1]) - 1, parseInt(parts[0]));
+          joinedDate.setHours(0, 0, 0, 0);
+
+          // Skip this customer if today is before their joined date
+          if (today < joinedDate) {
+            console.log(`Skipping record creation for ${customer.name} as their joined date (${customer.joinedDate}) is in the future`);
+            continue;
+          }
+        }
+      }
+
       // Check if record already exists for today
       const existingRecord = await Record.findOne({
         customer: customer._id,
